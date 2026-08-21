@@ -40,7 +40,46 @@
         </div>
       </div>
 
+      <!-- Class Quick Switcher in Header -->
+      <div class="class-picker-wrapper">
+        <button id="btn-class-dropdown" class="btn btn-outline btn-sm class-select-btn" title="Switch or Manage Classes">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="width: 1rem; height: 1rem; color: var(--primary);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+          <span id="current-class-name-header">Period 1</span>
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="width: 0.85rem; height: 0.85rem;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        <div id="class-dropdown-menu" class="class-dropdown-menu" style="display: none;">
+          <div class="dropdown-header">Select Class</div>
+          <div id="class-dropdown-list" class="class-dropdown-list"></div>
+          <div class="dropdown-divider"></div>
+          <button id="btn-dropdown-new-class" class="dropdown-item-action">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="width: 1rem; height: 1rem;">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            New Class...
+          </button>
+          <button id="btn-dropdown-manage-classes" class="dropdown-item-action">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="width: 1rem; height: 1rem;">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Manage Classes
+          </button>
+        </div>
+      </div>
+
       <div class="header-actions">
+        <button id="btn-open-constraints" class="btn btn-outline btn-sm" title="Manage Pairing Rules & Exclusions">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          <span>Rules (<span id="constraints-count-badge">0</span>)</span>
+        </button>
+
         <button id="btn-open-matrix" class="btn btn-outline btn-sm" title="View Pair Interaction Matrix">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -76,6 +115,19 @@
 
     <!-- Left Sidebar: Roster & Settings -->
     <aside class="sidebar-panel">
+
+      <!-- Class Header Card -->
+      <section class="card class-status-card">
+        <div class="class-status-inner">
+          <div class="class-status-details">
+            <span class="class-status-label">Active Class</span>
+            <h3 id="sidebar-class-name" class="class-status-title">Period 1</h3>
+          </div>
+          <button id="btn-manage-classes-sidebar" class="btn btn-outline btn-xs" title="Manage all classes">
+            Classes
+          </button>
+        </div>
+      </section>
 
       <!-- Student Input Card -->
       <section class="card">
@@ -198,6 +250,7 @@
           <span id="repetition-badge" class="status-badge fresh">
             ✨ 100% Fresh Pairings
           </span>
+          <span id="constraint-status-badge" class="status-badge" style="display: none;"></span>
         </div>
 
         <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
@@ -260,9 +313,110 @@
 
   </main>
 
+  <!-- Class Manager Modal -->
+  <div id="modal-classes" class="modal-backdrop">
+    <div class="modal-content" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Class Rosters Manager</h3>
+        <button class="btn-icon modal-close-btn" data-close="modal-classes">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 1.25rem;">
+        
+        <!-- Create Class Form -->
+        <div class="create-class-box">
+          <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem;">Create New Class</h4>
+          <form id="form-create-class" class="input-group">
+            <input 
+              type="text" 
+              id="input-new-class-name" 
+              class="form-input" 
+              placeholder="e.g. Period 2 - Algebra, AP Bio..." 
+              required
+            />
+            <button type="submit" class="btn btn-primary">Create Class</button>
+          </form>
+        </div>
+
+        <div>
+          <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem;">Your Classes</h4>
+          <div id="classes-list-container" class="classes-list"></div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-close-btn" data-close="modal-classes">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pairing Rules / Constraints Modal -->
+  <div id="modal-constraints" class="modal-backdrop">
+    <div class="modal-content" style="max-width: 680px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Pairing Rules & Constraints</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
+            Class: <strong id="constraints-class-name">Period 1</strong>
+          </p>
+        </div>
+        <button class="btn-icon modal-close-btn" data-close="modal-constraints">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 1.25rem;">
+        <p style="font-size: 0.85rem; color: var(--text-muted);">
+          Configure rules for this class roster. <strong>Avoid</strong> prevents two students from ever being grouped together. <strong>Prefer</strong> prioritizes grouping them together.
+        </p>
+
+        <!-- Add Rule Box -->
+        <div class="constraint-creator-box">
+          <h4 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.6rem;">Add New Pairing Rule</h4>
+          <form id="form-add-constraint" class="constraint-form-grid">
+            <div class="form-field">
+              <label for="select-student-1">Student 1</label>
+              <select id="select-student-1" class="form-select" required>
+                <option value="">Select Student...</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="select-constraint-type">Rule Type</label>
+              <select id="select-constraint-type" class="form-select" required>
+                <option value="avoid">⛔ Never Group (Avoid)</option>
+                <option value="prefer">🔗 Always Group (Prefer)</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="select-student-2">Student 2</label>
+              <select id="select-student-2" class="form-select" required>
+                <option value="">Select Student...</option>
+              </select>
+            </div>
+
+            <div class="form-field form-field-submit">
+              <label>&nbsp;</label>
+              <button type="submit" class="btn btn-primary" style="width: 100%;">Add Rule</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Rules List -->
+        <div>
+          <h4 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.6rem;">
+            Active Rules for this Class (<span id="constraints-active-count">0</span>)
+          </h4>
+          <div id="constraints-list-container" class="constraints-list"></div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-close-btn" data-close="modal-constraints">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Interaction Matrix Modal -->
   <div id="modal-matrix" class="modal-backdrop">
-    <div class="modal-content" style="max-width: 800px;">
+    <div class="modal-content" style="max-width: 850px;">
       <div class="modal-header">
         <h3 class="modal-title">Pairing Interaction Matrix</h3>
         <button class="btn-icon modal-close-btn" data-close="modal-matrix">&times;</button>
@@ -270,7 +424,7 @@
       <div class="modal-body">
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
           Shows how many times each pair of students has been grouped together. 
-          Green cells indicates students who have not yet worked together (0 times).
+          Green cells indicate students who have not yet worked together (0 times).
         </p>
         <div class="matrix-table-container">
           <table id="matrix-table" class="matrix-table"></table>
@@ -310,7 +464,7 @@
         <div>
           <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem;">Backup & Restore</h4>
           <p style="font-size: 0.825rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-            Export all your student rosters, pairing history, and settings to a JSON file, or restore from a previous backup.
+            Export all your classes, rosters, pairing rules, and history to a JSON file, or restore from a previous backup.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
             <button id="btn-export-json" class="btn btn-secondary btn-sm">
@@ -334,11 +488,11 @@
         <div>
           <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--danger-text);">Danger Zone</h4>
           <p style="font-size: 0.825rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-            Reset history to start pairings from scratch while keeping your roster, or wipe all app data completely.
+            Reset history for the current class or wipe all classes and data completely.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
             <button id="btn-reset-history-only" class="btn btn-outline btn-sm" style="color: var(--warning-text); border-color: var(--warning);">
-              Reset Pairing History Only
+              Reset Current Class History
             </button>
             <button id="btn-reset-all-data" class="btn btn-danger btn-sm">
               Wipe Everything (Factory Reset)

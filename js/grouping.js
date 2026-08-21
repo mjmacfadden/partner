@@ -1,7 +1,11 @@
 /**
  * Grouping and Pairing Algorithm Module
- * Generates optimal, randomized student groups that minimize repeated pairings.
+ * Generates optimal, randomized student groups that minimize repeated pairings
+ * and enforce pairing constraints (Avoid / Never Pair & Prefer / Always Pair).
  */
+
+const AVOID_PENALTY = 1000000000; // 10^9 penalty for placing avoid pairs together
+const PREFER_PENALTY = 100000000;  // 10^8 penalty for separating prefer pairs
 
 export class GroupingEngine {
   /**
@@ -46,12 +50,44 @@ export class GroupingEngine {
   }
 
   /**
+   * Parse constraint list into fast lookup structures
+   * @param {Array<{studentId1: string, studentId2: string, type: string}>} constraints
+   * @param {Set<string>} [activeIdSet]
+   * @returns {{avoidPairs: Set<string>, preferPairs: Set<string>, activePreferList: Array<{idA: string, idB: string}>}}
+   */
+  static buildConstraintSets(constraints = [], activeIdSet = null) {
+    const avoidPairs = new Set();
+    const preferPairs = new Set();
+    const activePreferList = [];
+
+    if (!Array.isArray(constraints)) {
+      return { avoidPairs, preferPairs, activePreferList };
+    }
+
+    for (const c of constraints) {
+      if (!c || !c.studentId1 || !c.studentId2) continue;
+      const key = this.getPairKey(c.studentId1, c.studentId2);
+      if (c.type === 'avoid') {
+        avoidPairs.add(key);
+      } else if (c.type === 'prefer') {
+        preferPairs.add(key);
+        if (!activeIdSet || (activeIdSet.has(c.studentId1) && activeIdSet.has(c.studentId2))) {
+          activePreferList.push({ idA: c.studentId1, idB: c.studentId2, key });
+        }
+      }
+    }
+
+    return { avoidPairs, preferPairs, activePreferList };
+  }
+
+  /**
    * Calculate coverage statistics
    * @param {Array<{id: string, name: string}>} activeStudents
    * @param {Array} history
+   * @param {Array} [constraints=[]]
    * @returns {Object}
    */
-  static calculateStats(activeStudents, history) {
+  static calculateStats(activeStudents, history, constraints = []) {
     const totalStudents = activeStudents.length;
     if (totalStudents < 2) {
       return {
@@ -62,7 +98,8 @@ export class GroupingEngine {
         cycleNumber: 1,
         minInteractions: 0,
         maxInteractions: 0,
-        allCombinationsMetOnce: false
+        allCombinationsMetOnce: false,
+        activeConstraintsCount: (constraints || []).length
       };
     }
 
@@ -101,7 +138,8 @@ export class GroupingEngine {
       cycleNumber,
       minInteractions,
       maxInteractions,
-      allCombinationsMetOnce
+      allCombinationsMetOnce,
+      activeConstraintsCount: (constraints || []).length
     };
   }
 
@@ -159,12 +197,13 @@ export class GroupingEngine {
   }
 
   /**
-   * Cost function for a single group based on previous interaction counts
+   * Cost function for a single group based on previous interaction counts & avoid constraints
    * @param {Array<string>} group - array of student IDs
    * @param {Map<string, number>} pairCounts
+   * @param {Set<string>} [avoidPairs]
    * @returns {number}
    */
-  static calculateGroupCost(group, pairCounts) {
+  static calculateGroupCost(group, pairCounts, avoidPairs = null) {
     let cost = 0;
     const len = group.length;
     for (let i = 0; i < len; i++) {
@@ -172,59 +211,94 @@ export class GroupingEngine {
         const key = this.getPairKey(group[i], group[j]);
         const count = pairCounts.get(key) || 0;
         cost += this.getPairWeight(count);
+
+        if (avoidPairs && avoidPairs.has(key)) {
+          cost += AVOID_PENALTY;
+        }
       }
     }
     return cost;
   }
 
   /**
-   * Total cost of a full grouping partition
+   * Total cost of a full grouping partition including historical counts and constraints
    * @param {Array<Array<string>>} groups
    * @param {Map<string, number>} pairCounts
+   * @param {Set<string>} [avoidPairs]
+   * @param {Array<{idA: string, idB: string}>} [activePreferList]
    * @returns {number}
    */
-  static calculateTotalCost(groups, pairCounts) {
+  static calculateTotalCost(groups, pairCounts, avoidPairs = null, activePreferList = null) {
     let total = 0;
     for (const group of groups) {
-      total += this.calculateGroupCost(group, pairCounts);
+      total += this.calculateGroupCost(group, pairCounts, avoidPairs);
     }
+
+    // Check prefer (Must Pair) constraints: penalize if prefer partners are in different groups
+    if (activePreferList && activePreferList.length > 0) {
+      const studentToGroupMap = new Map();
+      groups.forEach((group, gIdx) => {
+        for (const id of group) {
+          studentToGroupMap.set(id, gIdx);
+        }
+      });
+
+      for (const pref of activePreferList) {
+        const gA = studentToGroupMap.get(pref.idA);
+        const gB = studentToGroupMap.get(pref.idB);
+        if (gA !== undefined && gB !== undefined && gA !== gB) {
+          total += PREFER_PENALTY;
+        }
+      }
+    }
+
     return total;
   }
 
   /**
-   * Generate optimal randomized groups avoiding repeats
+   * Generate optimal randomized groups avoiding repeats and enforcing constraints
    * @param {Array<{id: string, name: string}>} activeStudents
    * @param {number} targetGroupSize
    * @param {Array} history
+   * @param {Array} [constraints=[]]
    * @returns {Object}
    */
-  static generateGroups(activeStudents, targetGroupSize, history) {
+  static generateGroups(activeStudents, targetGroupSize, history, constraints = []) {
     if (!activeStudents || activeStudents.length === 0) {
       return {
         groups: [],
+        groupIds: [],
         groupSizes: [],
         cost: 0,
         newPairsCount: 0,
         repeatPairsCount: 0,
+        avoidViolations: 0,
+        preferSatisfied: 0,
+        preferTotal: 0,
         pairDetails: []
       };
     }
 
     const studentMap = new Map();
-    activeStudents.forEach(s => studentMap.set(s.id, s));
+    const activeStudentIdSet = new Set();
+    activeStudents.forEach(s => {
+      studentMap.set(s.id, s);
+      activeStudentIdSet.add(s.id);
+    });
 
     const totalStudents = activeStudents.length;
     const groupSizes = this.calculateBalancedGroupSizes(totalStudents, targetGroupSize);
     const pairCounts = this.buildInteractionMap(activeStudents, history);
+    const { avoidPairs, preferPairs, activePreferList } = this.buildConstraintSets(constraints, activeStudentIdSet);
 
     if (groupSizes.length <= 1) {
       const singleGroup = activeStudents.map(s => s.id);
-      const cost = this.calculateGroupCost(singleGroup, pairCounts);
-      return this._formatResult([singleGroup], groupSizes, cost, pairCounts, studentMap);
+      const cost = this.calculateTotalCost([singleGroup], pairCounts, avoidPairs, activePreferList);
+      return this._formatResult([singleGroup], groupSizes, cost, pairCounts, studentMap, avoidPairs, preferPairs, activePreferList);
     }
 
     // Optimization: Simulated Annealing + Multi-Restart Local Search
-    const NUM_RESTARTS = Math.min(200, Math.max(50, totalStudents * 8));
+    const NUM_RESTARTS = Math.min(250, Math.max(60, totalStudents * 10));
     let bestGroups = null;
     let bestCost = Infinity;
 
@@ -246,17 +320,22 @@ export class GroupingEngine {
         cursor += size;
       }
 
-      let currentCost = this.calculateTotalCost(currentGroups, pairCounts);
+      let currentCost = this.calculateTotalCost(currentGroups, pairCounts, avoidPairs, activePreferList);
 
       if (currentCost === 0) {
-        bestGroups = currentGroups;
+        bestGroups = currentGroups.map(g => [...g]);
         bestCost = 0;
         break;
       }
 
-      // 3. Fast simulated annealing with 2-opt and 3-opt swaps
-      let temp = 50.0;
-      const coolingRate = 0.95;
+      if (currentCost < bestCost) {
+        bestCost = currentCost;
+        bestGroups = currentGroups.map(g => [...g]);
+      }
+
+      // 3. Fast simulated annealing with group swaps
+      let temp = 100.0;
+      const coolingRate = 0.94;
       const MAX_STEPS = 200;
 
       for (let step = 0; step < MAX_STEPS && temp > 0.01; step++) {
@@ -275,21 +354,18 @@ export class GroupingEngine {
         const i1 = Math.floor(Math.random() * group1.length);
         const i2 = Math.floor(Math.random() * group2.length);
 
-        const oldCostG1 = this.calculateGroupCost(group1, pairCounts);
-        const oldCostG2 = this.calculateGroupCost(group2, pairCounts);
+        const oldTotal = currentCost;
 
-        // Tentative swap
+        // Swap students
         const tempStudent = group1[i1];
         group1[i1] = group2[i2];
         group2[i2] = tempStudent;
 
-        const newCostG1 = this.calculateGroupCost(group1, pairCounts);
-        const newCostG2 = this.calculateGroupCost(group2, pairCounts);
-
-        const delta = (newCostG1 + newCostG2) - (oldCostG1 + oldCostG2);
+        const newTotal = this.calculateTotalCost(currentGroups, pairCounts, avoidPairs, activePreferList);
+        const delta = newTotal - oldTotal;
 
         if (delta <= 0 || Math.random() < Math.exp(-delta / Math.max(0.1, temp))) {
-          currentCost += delta;
+          currentCost = newTotal;
           if (currentCost < bestCost) {
             bestCost = currentCost;
             bestGroups = currentGroups.map(g => [...g]);
@@ -323,20 +399,16 @@ export class GroupingEngine {
 
             for (let i = 0; i < group1.length; i++) {
               for (let j = 0; j < group2.length; j++) {
-                const oldPairCost = 
-                  this.calculateGroupCost(group1, pairCounts) + 
-                  this.calculateGroupCost(group2, pairCounts);
+                const oldTotal = this.calculateTotalCost(bestGroups, pairCounts, avoidPairs, activePreferList);
 
                 const temp = group1[i];
                 group1[i] = group2[j];
                 group2[j] = temp;
 
-                const newPairCost = 
-                  this.calculateGroupCost(group1, pairCounts) + 
-                  this.calculateGroupCost(group2, pairCounts);
+                const newTotal = this.calculateTotalCost(bestGroups, pairCounts, avoidPairs, activePreferList);
 
-                if (newPairCost < oldPairCost) {
-                  bestCost += (newPairCost - oldPairCost);
+                if (newTotal < oldTotal) {
+                  bestCost = newTotal;
                   improved = true;
                   if (bestCost === 0) break;
                 } else {
@@ -354,17 +426,46 @@ export class GroupingEngine {
       }
     }
 
-    return this._formatResult(bestGroups, groupSizes, bestCost, pairCounts, studentMap);
+    return this._formatResult(
+      bestGroups || [studentIds],
+      groupSizes,
+      bestCost,
+      pairCounts,
+      studentMap,
+      avoidPairs,
+      preferPairs,
+      activePreferList
+    );
   }
 
   /**
    * Helper to format final result object with enriched data
    * @private
    */
-  static _formatResult(groupsOfIds, groupSizes, cost, pairCounts, studentMap) {
+  static _formatResult(groupsOfIds, groupSizes, cost, pairCounts, studentMap, avoidPairs = new Set(), preferPairs = new Set(), activePreferList = []) {
     let newPairsCount = 0;
     let repeatPairsCount = 0;
+    let avoidViolations = 0;
+    let preferSatisfied = 0;
     const pairDetails = [];
+
+    const studentToGroupMap = new Map();
+    groupsOfIds.forEach((group, gIdx) => {
+      for (const id of group) {
+        studentToGroupMap.set(id, gIdx);
+      }
+    });
+
+    // Check prefer satisfaction
+    if (activePreferList && activePreferList.length > 0) {
+      for (const pref of activePreferList) {
+        const gA = studentToGroupMap.get(pref.idA);
+        const gB = studentToGroupMap.get(pref.idB);
+        if (gA !== undefined && gB !== undefined && gA === gB) {
+          preferSatisfied++;
+        }
+      }
+    }
 
     const enrichedGroups = groupsOfIds.map((group, groupIdx) => {
       const studentObjects = group.map(id => studentMap.get(id) || { id, name: id });
@@ -373,16 +474,28 @@ export class GroupingEngine {
         for (let j = i + 1; j < group.length; j++) {
           const key = this.getPairKey(group[i], group[j]);
           const previousCount = pairCounts.get(key) || 0;
+          const isAvoid = avoidPairs.has(key);
+          const isPrefer = preferPairs.has(key);
+
+          if (isAvoid) {
+            avoidViolations++;
+          }
+
           if (previousCount === 0) {
             newPairsCount++;
           } else {
             repeatPairsCount++;
           }
+
           pairDetails.push({
             studentA: studentObjects[i].name,
             studentB: studentObjects[j].name,
+            studentIdA: group[i],
+            studentIdB: group[j],
             previousCount,
-            groupIndex: groupIdx + 1
+            groupIndex: groupIdx + 1,
+            isAvoid,
+            isPrefer
           });
         }
       }
@@ -397,6 +510,9 @@ export class GroupingEngine {
       cost,
       newPairsCount,
       repeatPairsCount,
+      avoidViolations,
+      preferSatisfied,
+      preferTotal: activePreferList ? activePreferList.length : 0,
       pairDetails
     };
   }

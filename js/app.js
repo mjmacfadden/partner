@@ -1,5 +1,6 @@
 /**
  * Main Application Controller for Partner
+ * Manages multiple classes, rosters, pairing constraints, history, and user interactions.
  */
 
 import { StorageManager } from './storage.js';
@@ -23,8 +24,10 @@ const SAMPLE_STUDENTS = [
 
 class PartnerApp {
   constructor() {
-    this.students = StorageManager.getStudents();
-    this.history = StorageManager.getHistory();
+    this.activeClass = StorageManager.getActiveClass();
+    this.students = this.activeClass.students || [];
+    this.history = this.activeClass.history || [];
+    this.constraints = this.activeClass.constraints || [];
     this.settings = StorageManager.getSettings();
 
     this.selectedGroupSize = this.settings.defaultGroupSize || 2;
@@ -33,8 +36,10 @@ class PartnerApp {
     this.initDOM();
     this.initTheme();
     this.bindEvents();
+    this.renderClassHeader();
     this.renderRoster();
     this.updateStatsAndPrediction();
+    this.updateConstraintsBadges();
 
     // If there's history, restore the latest round display
     if (this.history.length > 0) {
@@ -46,7 +51,7 @@ class PartnerApp {
    * Cache DOM elements
    */
   initDOM() {
-    // Buttons & Toggles
+    // Header & Theme
     this.themeToggleBtn = document.getElementById('btn-toggle-theme');
     this.themeIconSun = document.getElementById('theme-icon-sun');
     this.btnOpenMatrix = document.getElementById('btn-open-matrix');
@@ -55,6 +60,34 @@ class PartnerApp {
     this.btnProjectorMode = document.getElementById('btn-projector-mode');
     this.btnExitProjector = document.getElementById('btn-exit-projector');
     this.historyCountBadge = document.getElementById('history-count-badge');
+
+    // Class Switcher & Headers
+    this.btnClassDropdown = document.getElementById('btn-class-dropdown');
+    this.classDropdownMenu = document.getElementById('class-dropdown-menu');
+    this.classDropdownList = document.getElementById('class-dropdown-list');
+    this.currentClassNameHeader = document.getElementById('current-class-name-header');
+    this.sidebarClassName = document.getElementById('sidebar-class-name');
+    this.btnDropdownNewClass = document.getElementById('btn-dropdown-new-class');
+    this.btnDropdownManageClasses = document.getElementById('btn-dropdown-manage-classes');
+    this.btnManageClassesSidebar = document.getElementById('btn-manage-classes-sidebar');
+
+    // Class Manager Modal
+    this.modalClasses = document.getElementById('modal-classes');
+    this.formCreateClass = document.getElementById('form-create-class');
+    this.inputNewClassName = document.getElementById('input-new-class-name');
+    this.classesListContainer = document.getElementById('classes-list-container');
+
+    // Constraints Elements & Modal
+    this.btnOpenConstraints = document.getElementById('btn-open-constraints');
+    this.constraintsCountBadge = document.getElementById('constraints-count-badge');
+    this.modalConstraints = document.getElementById('modal-constraints');
+    this.constraintsClassName = document.getElementById('constraints-class-name');
+    this.formAddConstraint = document.getElementById('form-add-constraint');
+    this.selectStudent1 = document.getElementById('select-student-1');
+    this.selectStudent2 = document.getElementById('select-student-2');
+    this.selectConstraintType = document.getElementById('select-constraint-type');
+    this.constraintsActiveCount = document.getElementById('constraints-active-count');
+    this.constraintsListContainer = document.getElementById('constraints-list-container');
 
     // Input Tabs & Forms
     this.tabSingle = document.getElementById('tab-single');
@@ -84,6 +117,7 @@ class PartnerApp {
     this.resultsBar = document.getElementById('results-bar');
     this.roundIndicator = document.getElementById('round-indicator');
     this.repetitionBadge = document.getElementById('repetition-badge');
+    this.constraintStatusBadge = document.getElementById('constraint-status-badge');
     this.btnCopyGroups = document.getElementById('btn-copy-groups');
     this.btnRegenerate = document.getElementById('btn-regenerate');
     this.groupsContainer = document.getElementById('groups-container');
@@ -142,6 +176,56 @@ class PartnerApp {
   bindEvents() {
     // Theme toggle
     this.themeToggleBtn.addEventListener('click', () => this.toggleTheme());
+
+    // Class Picker & Dropdown
+    this.btnClassDropdown.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleClassDropdown();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!this.btnClassDropdown.contains(e.target) && !this.classDropdownMenu.contains(e.target)) {
+        this.classDropdownMenu.style.display = 'none';
+      }
+    });
+
+    this.btnDropdownNewClass.addEventListener('click', () => {
+      this.classDropdownMenu.style.display = 'none';
+      this.openClassesModal();
+      setTimeout(() => this.inputNewClassName.focus(), 150);
+    });
+
+    this.btnDropdownManageClasses.addEventListener('click', () => {
+      this.classDropdownMenu.style.display = 'none';
+      this.openClassesModal();
+    });
+
+    this.btnManageClassesSidebar.addEventListener('click', () => {
+      this.openClassesModal();
+    });
+
+    // Create Class Form
+    this.formCreateClass.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = this.inputNewClassName.value.trim();
+      if (name) {
+        this.createClass(name);
+        this.inputNewClassName.value = '';
+      }
+    });
+
+    // Constraints & Rules
+    this.btnOpenConstraints.addEventListener('click', () => this.openConstraintsModal());
+
+    this.formAddConstraint.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s1 = this.selectStudent1.value;
+      const s2 = this.selectStudent2.value;
+      const type = this.selectConstraintType.value;
+      if (s1 && s2 && type) {
+        this.addConstraint(s1, s2, type);
+      }
+    });
 
     // Input Tabs
     this.tabSingle.addEventListener('click', () => this.switchInputTab('single'));
@@ -224,7 +308,7 @@ class PartnerApp {
     });
 
     // Close modal on backdrop click
-    [this.modalMatrix, this.modalHistory, this.modalSettings].forEach(modal => {
+    [this.modalMatrix, this.modalHistory, this.modalSettings, this.modalClasses, this.modalConstraints].forEach(modal => {
       modal.addEventListener('click', (e) => {
         if (e.target === modal) {
           this.closeModal(modal);
@@ -238,6 +322,346 @@ class PartnerApp {
     this.btnResetAllData.addEventListener('click', () => this.factoryReset());
     this.btnExportJson.addEventListener('click', () => this.exportBackup());
     this.inputImportJson.addEventListener('change', (e) => this.importBackup(e));
+  }
+
+  /**
+   * Render Class Headers and Dropdown
+   */
+  renderClassHeader() {
+    const className = this.activeClass.name || 'Period 1';
+    this.currentClassNameHeader.textContent = className;
+    this.sidebarClassName.textContent = className;
+    this.constraintsClassName.textContent = className;
+  }
+
+  toggleClassDropdown() {
+    const isVisible = this.classDropdownMenu.style.display === 'block';
+    if (isVisible) {
+      this.classDropdownMenu.style.display = 'none';
+    } else {
+      this.renderClassDropdown();
+      this.classDropdownMenu.style.display = 'block';
+    }
+  }
+
+  renderClassDropdown() {
+    const classes = StorageManager.getClasses();
+    this.classDropdownList.innerHTML = '';
+
+    classes.forEach(cls => {
+      const btn = document.createElement('button');
+      btn.className = `dropdown-item ${cls.id === this.activeClass.id ? 'active' : ''}`;
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = cls.name;
+      nameSpan.style.overflow = 'hidden';
+      nameSpan.style.textOverflow = 'ellipsis';
+      nameSpan.style.whiteSpace = 'nowrap';
+
+      const meta = document.createElement('span');
+      meta.className = 'dropdown-item-meta';
+      const studentCount = (cls.students || []).length;
+      meta.textContent = `${studentCount} student${studentCount === 1 ? '' : 's'}`;
+
+      btn.appendChild(nameSpan);
+      btn.appendChild(meta);
+
+      btn.addEventListener('click', () => {
+        this.switchClass(cls.id);
+        this.classDropdownMenu.style.display = 'none';
+      });
+
+      this.classDropdownList.appendChild(btn);
+    });
+  }
+
+  /**
+   * Open Class Manager Modal
+   */
+  openClassesModal() {
+    this.renderClassesManagerList();
+    this.openModal(this.modalClasses);
+  }
+
+  renderClassesManagerList() {
+    const classes = StorageManager.getClasses();
+    this.classesListContainer.innerHTML = '';
+
+    classes.forEach(cls => {
+      const isActive = cls.id === this.activeClass.id;
+      const card = document.createElement('div');
+      card.className = `class-row-card ${isActive ? 'active' : ''}`;
+
+      const info = document.createElement('div');
+      info.className = 'class-row-info';
+
+      const name = document.createElement('div');
+      name.className = 'class-row-name';
+      name.textContent = cls.name;
+      if (isActive) {
+        const badge = document.createElement('span');
+        badge.className = 'constraint-badge prefer';
+        badge.style.marginLeft = '0.5rem';
+        badge.style.fontSize = '0.7rem';
+        badge.textContent = 'Active';
+        name.appendChild(badge);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'class-row-meta';
+      const studentCount = (cls.students || []).length;
+      const historyCount = (cls.history || []).length;
+      const rulesCount = (cls.constraints || []).length;
+      meta.innerHTML = `
+        <span>👥 ${studentCount} students</span>
+        <span>•</span>
+        <span>📜 ${historyCount} rounds</span>
+        <span>•</span>
+        <span>🛡️ ${rulesCount} rules</span>
+      `;
+
+      info.appendChild(name);
+      info.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'class-row-actions';
+
+      if (!isActive) {
+        const switchBtn = document.createElement('button');
+        switchBtn.className = 'btn btn-primary btn-xs';
+        switchBtn.textContent = 'Switch';
+        switchBtn.addEventListener('click', () => {
+          this.switchClass(cls.id);
+          this.renderClassesManagerList();
+        });
+        actions.appendChild(switchBtn);
+      }
+
+      const renameBtn = document.createElement('button');
+      renameBtn.className = 'btn btn-secondary btn-xs';
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', () => {
+        const newName = prompt(`Rename class "${cls.name}":`, cls.name);
+        if (newName && newName.trim() && newName.trim() !== cls.name) {
+          StorageManager.renameClass(cls.id, newName.trim());
+          if (cls.id === this.activeClass.id) {
+            this.activeClass.name = newName.trim();
+            this.renderClassHeader();
+          }
+          this.renderClassesManagerList();
+          this.showToast(`Renamed class to "${newName.trim()}"`);
+        }
+      });
+      actions.appendChild(renameBtn);
+
+      const duplicateBtn = document.createElement('button');
+      duplicateBtn.className = 'btn btn-secondary btn-xs';
+      duplicateBtn.textContent = 'Copy';
+      duplicateBtn.title = 'Duplicate class with same roster and rules';
+      duplicateBtn.addEventListener('click', () => {
+        const dup = StorageManager.duplicateClass(cls.id);
+        if (dup) {
+          this.switchClass(dup.id);
+          this.renderClassesManagerList();
+          this.showToast(`Duplicated class as "${dup.name}"`);
+        }
+      });
+      actions.appendChild(duplicateBtn);
+
+      if (classes.length > 1) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-danger btn-xs';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', () => {
+          if (confirm(`Are you sure you want to delete class "${cls.name}"? This cannot be undone.`)) {
+            const nextActive = StorageManager.deleteClass(cls.id);
+            this.activeClass = nextActive;
+            this.students = this.activeClass.students || [];
+            this.history = this.activeClass.history || [];
+            this.constraints = this.activeClass.constraints || [];
+            this.renderClassHeader();
+            this.renderRoster();
+            this.updateStatsAndPrediction();
+            this.updateConstraintsBadges();
+            this.renderClassesManagerList();
+            this.showToast(`Deleted class "${cls.name}"`);
+          }
+        });
+        actions.appendChild(deleteBtn);
+      }
+
+      card.appendChild(info);
+      card.appendChild(actions);
+      this.classesListContainer.appendChild(card);
+    });
+  }
+
+  createClass(name) {
+    const newClass = StorageManager.createClass(name);
+    this.switchClass(newClass.id);
+    this.renderClassesManagerList();
+    this.showToast(`Created and switched to "${newClass.name}"`);
+  }
+
+  switchClass(classId) {
+    const target = StorageManager.switchClass(classId);
+    if (!target) return;
+
+    this.activeClass = target;
+    this.students = this.activeClass.students || [];
+    this.history = this.activeClass.history || [];
+    this.constraints = this.activeClass.constraints || [];
+    this.currentResult = null;
+
+    this.renderClassHeader();
+    this.renderRoster();
+    this.updateStatsAndPrediction();
+    this.updateConstraintsBadges();
+
+    // Update result view
+    if (this.history.length > 0) {
+      this.displayLastRoundFromHistory();
+    } else {
+      this.groupsContainer.innerHTML = '';
+      this.resultsBar.style.display = 'none';
+      this.emptyState.style.display = 'block';
+    }
+
+    this.showToast(`Switched to ${this.activeClass.name}`);
+  }
+
+  /**
+   * Pairing Constraints Management
+   */
+  openConstraintsModal() {
+    this.constraintsClassName.textContent = this.activeClass.name;
+    this.populateConstraintStudentSelects();
+    this.renderConstraintsList();
+    this.openModal(this.modalConstraints);
+  }
+
+  populateConstraintStudentSelects() {
+    this.selectStudent1.innerHTML = '<option value="">Select Student 1...</option>';
+    this.selectStudent2.innerHTML = '<option value="">Select Student 2...</option>';
+
+    const sortedStudents = [...this.students].sort((a, b) => a.name.localeCompare(b.name));
+
+    sortedStudents.forEach(s => {
+      const opt1 = document.createElement('option');
+      opt1.value = s.id;
+      opt1.textContent = s.name + (s.active ? '' : ' (Absent)');
+      this.selectStudent1.appendChild(opt1);
+
+      const opt2 = document.createElement('option');
+      opt2.value = s.id;
+      opt2.textContent = s.name + (s.active ? '' : ' (Absent)');
+      this.selectStudent2.appendChild(opt2);
+    });
+  }
+
+  addConstraint(studentId1, studentId2, type) {
+    if (studentId1 === studentId2) {
+      this.showToast('Please select two different students.');
+      return;
+    }
+
+    const key = GroupingEngine.getPairKey(studentId1, studentId2);
+    const existingIndex = this.constraints.findIndex(
+      c => GroupingEngine.getPairKey(c.studentId1, c.studentId2) === key
+    );
+
+    if (existingIndex !== -1) {
+      this.showToast('A pairing rule already exists for these two students.');
+      return;
+    }
+
+    const newConstraint = {
+      id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      studentId1,
+      studentId2,
+      type // 'avoid' | 'prefer'
+    };
+
+    this.constraints.push(newConstraint);
+    this.persistConstraints();
+    this.renderConstraintsList();
+    this.updateConstraintsBadges();
+    this.updateStatsAndPrediction();
+
+    const s1 = this.students.find(s => s.id === studentId1)?.name || 'Student 1';
+    const s2 = this.students.find(s => s.id === studentId2)?.name || 'Student 2';
+    const typeLabel = type === 'avoid' ? 'Never Group' : 'Always Group';
+    this.showToast(`Rule added: ${s1} & ${s2} (${typeLabel})`);
+
+    // Reset selects
+    this.selectStudent1.value = '';
+    this.selectStudent2.value = '';
+  }
+
+  deleteConstraint(constraintId) {
+    this.constraints = this.constraints.filter(c => c.id !== constraintId);
+    this.persistConstraints();
+    this.renderConstraintsList();
+    this.updateConstraintsBadges();
+    this.updateStatsAndPrediction();
+    this.showToast('Pairing rule removed.');
+  }
+
+  renderConstraintsList() {
+    this.constraintsListContainer.innerHTML = '';
+    this.constraintsActiveCount.textContent = this.constraints.length;
+
+    if (this.constraints.length === 0) {
+      this.constraintsListContainer.innerHTML = `
+        <div style="text-align: center; color: var(--text-muted); padding: 1.5rem; font-size: 0.85rem; background: var(--bg-card-alt); border-radius: var(--radius-md);">
+          No pairing rules set for this class yet.<br>
+          Select two students above to add an <strong>Avoid</strong> or <strong>Prefer</strong> rule.
+        </div>
+      `;
+      return;
+    }
+
+    const studentMap = new Map();
+    this.students.forEach(s => studentMap.set(s.id, s));
+
+    this.constraints.forEach(c => {
+      const s1 = studentMap.get(c.studentId1) || { name: 'Unknown Student' };
+      const s2 = studentMap.get(c.studentId2) || { name: 'Unknown Student' };
+
+      const card = document.createElement('div');
+      card.className = 'constraint-item-card';
+
+      const pairInfo = document.createElement('div');
+      pairInfo.className = 'constraint-item-pair';
+
+      const s1Span = document.createElement('strong');
+      s1Span.textContent = s1.name;
+
+      const badge = document.createElement('span');
+      badge.className = `constraint-badge ${c.type}`;
+      badge.textContent = c.type === 'avoid' ? '⛔ Never Pair' : '🔗 Always Pair';
+
+      const s2Span = document.createElement('strong');
+      s2Span.textContent = s2.name;
+
+      pairInfo.appendChild(s1Span);
+      pairInfo.appendChild(badge);
+      pairInfo.appendChild(s2Span);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn btn-danger btn-xs';
+      deleteBtn.textContent = 'Remove';
+      deleteBtn.addEventListener('click', () => this.deleteConstraint(c.id));
+
+      card.appendChild(pairInfo);
+      card.appendChild(deleteBtn);
+      this.constraintsListContainer.appendChild(card);
+    });
+  }
+
+  updateConstraintsBadges() {
+    const count = this.constraints.length;
+    this.constraintsCountBadge.textContent = count;
   }
 
   /**
@@ -281,7 +705,6 @@ class PartnerApp {
     const trimmed = name.trim();
     if (!trimmed) return;
 
-    // Check duplicate name warning
     if (this.students.some(s => s.name.toLowerCase() === trimmed.toLowerCase())) {
       this.showToast(`Note: A student named "${trimmed}" is already on the roster.`);
     }
@@ -379,6 +802,7 @@ class PartnerApp {
     this.persistStudents();
     this.renderRoster();
     this.updateStatsAndPrediction();
+    this.updateConstraintsBadges();
     this.showToast(`Removed ${name}`);
   }
 
@@ -392,6 +816,7 @@ class PartnerApp {
       this.persistStudents();
       this.renderRoster();
       this.updateStatsAndPrediction();
+      this.updateConstraintsBadges();
       this.showToast('Roster cleared');
     }
   }
@@ -473,14 +898,19 @@ class PartnerApp {
           return `${count} ${label}`;
         });
 
-      this.groupPrediction.innerHTML = `<strong>${N} active students</strong> will form <strong>${parts.join(' and ')}</strong>.`;
+      let ruleText = '';
+      if (this.constraints.length > 0) {
+        ruleText = ` with <strong>${this.constraints.length} rule${this.constraints.length > 1 ? 's' : ''}</strong> applied`;
+      }
+
+      this.groupPrediction.innerHTML = `<strong>${N} active students</strong> will form <strong>${parts.join(' and ')}</strong>${ruleText}.`;
     }
 
     // Update History Badge
     this.historyCountBadge.textContent = this.history.length;
 
     // Update Coverage Card
-    const stats = GroupingEngine.calculateStats(active, this.history);
+    const stats = GroupingEngine.calculateStats(active, this.history, this.constraints);
     this.coveragePercentageText.textContent = `${stats.coveragePercent}%`;
     this.coverageProgressBar.style.width = `${stats.coveragePercent}%`;
     this.coverageDetailText.textContent = `${stats.metPairs} of ${stats.totalPossiblePairs} unique pairs have worked together`;
@@ -500,7 +930,8 @@ class PartnerApp {
     const result = GroupingEngine.generateGroups(
       activeStudents,
       this.selectedGroupSize,
-      this.history
+      this.history,
+      this.constraints
     );
 
     this.currentResult = result;
@@ -513,7 +944,10 @@ class PartnerApp {
       groups: result.groupIds,
       studentNames: Object.fromEntries(activeStudents.map(s => [s.id, s.name])),
       cost: result.cost,
-      repeatPairsCount: result.repeatPairsCount
+      repeatPairsCount: result.repeatPairsCount,
+      avoidViolations: result.avoidViolations || 0,
+      preferSatisfied: result.preferSatisfied || 0,
+      preferTotal: result.preferTotal || 0
     };
 
     this.history.push(roundRecord);
@@ -524,15 +958,17 @@ class PartnerApp {
     this.updateStatsAndPrediction();
 
     // Friendly feedback
-    if (result.repeatPairsCount === 0) {
-      this.showToast('🎉 Generated fresh non-repeating groups!');
+    if (result.avoidViolations > 0) {
+      this.showToast(`⚠️ Warning: ${result.avoidViolations} Avoid rule(s) could not be mathematically satisfied.`);
+    } else if (result.repeatPairsCount === 0) {
+      this.showToast('🎉 Generated fresh non-repeating groups with all rules respected!');
     } else {
       this.showToast(`Generated groups (${result.repeatPairsCount} previous pairing${result.repeatPairsCount > 1 ? 's' : ''} repeated).`);
     }
   }
 
   /**
-   * Display latest round from history on page load
+   * Display latest round from history on page load or class switch
    */
   displayLastRoundFromHistory() {
     const lastRound = this.history[this.history.length - 1];
@@ -551,7 +987,10 @@ class PartnerApp {
       groups: enrichedGroups,
       groupIds: lastRound.groups,
       groupSizes: lastRound.groups.map(g => g.length),
-      repeatPairsCount: lastRound.repeatPairsCount || 0
+      repeatPairsCount: lastRound.repeatPairsCount || 0,
+      avoidViolations: lastRound.avoidViolations || 0,
+      preferSatisfied: lastRound.preferSatisfied || 0,
+      preferTotal: lastRound.preferTotal || 0
     };
 
     this.currentResult = mockResult;
@@ -574,6 +1013,19 @@ class PartnerApp {
     } else {
       this.repetitionBadge.className = 'status-badge repeats';
       this.repetitionBadge.innerHTML = `🔄 ${result.repeatPairsCount} repeat pairing${result.repeatPairsCount > 1 ? 's' : ''}`;
+    }
+
+    // Constraint status badge
+    if (result.avoidViolations && result.avoidViolations > 0) {
+      this.constraintStatusBadge.style.display = 'inline-flex';
+      this.constraintStatusBadge.className = 'status-badge constraints-warning';
+      this.constraintStatusBadge.innerHTML = `⚠️ ${result.avoidViolations} Avoid Conflict`;
+    } else if (this.constraints.length > 0) {
+      this.constraintStatusBadge.style.display = 'inline-flex';
+      this.constraintStatusBadge.className = 'status-badge constraints-ok';
+      this.constraintStatusBadge.innerHTML = `🛡️ ${this.constraints.length} Rule${this.constraints.length > 1 ? 's' : ''} Enforced`;
+    } else {
+      this.constraintStatusBadge.style.display = 'none';
     }
 
     result.groups.forEach((group, groupIdx) => {
@@ -688,6 +1140,7 @@ class PartnerApp {
     }
 
     const pairCounts = GroupingEngine.buildInteractionMap(active, this.history);
+    const { avoidPairs, preferPairs } = GroupingEngine.buildConstraintSets(this.constraints);
     this.matrixTable.innerHTML = '';
 
     // Header Row
@@ -721,13 +1174,26 @@ class PartnerApp {
         } else {
           const key = GroupingEngine.getPairKey(s1.id, s2.id);
           const count = pairCounts.get(key) || 0;
+          const isAvoid = avoidPairs.has(key);
+          const isPrefer = preferPairs.has(key);
+
           td.textContent = count;
+
+          let tooltip = `${s1.name} and ${s2.name}: ${count} previous meeting${count === 1 ? '' : 's'}.`;
+          if (isAvoid) tooltip += ' [⛔ NEVER PAIR RULE]';
+          if (isPrefer) tooltip += ' [🔗 ALWAYS PAIR RULE]';
+          td.title = tooltip;
+
+          if (isAvoid) {
+            td.style.boxShadow = 'inset 0 0 0 2px var(--danger)';
+          } else if (isPrefer) {
+            td.style.boxShadow = 'inset 0 0 0 2px var(--primary)';
+          }
+
           if (count === 0) {
             td.className = 'matrix-cell-0';
-            td.title = `${s1.name} and ${s2.name} have NOT worked together yet.`;
           } else {
             td.className = 'matrix-cell-met';
-            td.title = `${s1.name} and ${s2.name} have worked together ${count} time${count > 1 ? 's' : ''}.`;
           }
         }
         tr.appendChild(td);
@@ -749,7 +1215,7 @@ class PartnerApp {
     if (this.history.length === 0) {
       this.historyListContainer.innerHTML = `
         <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
-          No past grouping rounds recorded yet.
+          No past grouping rounds recorded for ${this.activeClass.name} yet.
         </div>
       `;
     } else {
@@ -824,17 +1290,17 @@ class PartnerApp {
   }
 
   /**
-   * Clear History Only
+   * Clear History Only for Current Class
    */
   clearHistory() {
     if (this.history.length === 0) return;
-    if (confirm('Are you sure you want to reset all pairing history? Student roster will be kept.')) {
+    if (confirm(`Are you sure you want to reset pairing history for "${this.activeClass.name}"? Student roster and pairing rules will be kept.`)) {
       this.history = [];
       this.persistHistory();
       this.updateStatsAndPrediction();
       this.closeModal(this.modalHistory);
       this.closeModal(this.modalSettings);
-      this.showToast('Pairing history reset to zero');
+      this.showToast(`Pairing history reset for ${this.activeClass.name}`);
     }
   }
 
@@ -842,13 +1308,17 @@ class PartnerApp {
    * Factory Reset (Wipe Everything)
    */
   factoryReset() {
-    if (confirm('WARNING: This will wipe all students, history, and settings from localStorage. Continue?')) {
+    if (confirm('WARNING: This will wipe all classes, student rosters, pairing rules, and history from localStorage. Continue?')) {
       StorageManager.clearAll();
-      this.students = [];
-      this.history = [];
+      this.activeClass = StorageManager.getActiveClass();
+      this.students = this.activeClass.students || [];
+      this.history = this.activeClass.history || [];
+      this.constraints = this.activeClass.constraints || [];
       this.selectedGroupSize = 2;
+      this.renderClassHeader();
       this.renderRoster();
       this.updateStatsAndPrediction();
+      this.updateConstraintsBadges();
       this.groupsContainer.innerHTML = '';
       this.resultsBar.style.display = 'none';
       this.emptyState.style.display = 'block';
@@ -867,10 +1337,10 @@ class PartnerApp {
     const a = document.createElement('a');
     const dateStr = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `partner-backup-${dateStr}.json`;
+    a.download = `partner-all-classes-${dateStr}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    this.showToast('Exported backup file');
+    this.showToast('Exported full multi-class backup file');
   }
 
   /**
@@ -885,11 +1355,16 @@ class PartnerApp {
       try {
         const content = e.target.result;
         StorageManager.importData(content);
-        this.students = StorageManager.getStudents();
-        this.history = StorageManager.getHistory();
+        this.activeClass = StorageManager.getActiveClass();
+        this.students = this.activeClass.students || [];
+        this.history = this.activeClass.history || [];
+        this.constraints = this.activeClass.constraints || [];
         this.settings = StorageManager.getSettings();
+
+        this.renderClassHeader();
         this.renderRoster();
         this.updateStatsAndPrediction();
+        this.updateConstraintsBadges();
         this.closeModal(this.modalSettings);
         this.showToast('Backup restored successfully!');
       } catch (err) {
@@ -901,14 +1376,20 @@ class PartnerApp {
   }
 
   /**
-   * Save helpers
+   * Persistence helpers
    */
   persistStudents() {
     StorageManager.saveStudents(this.students);
+    // Refresh constraints after auto-cleanup
+    this.constraints = StorageManager.getConstraints();
   }
 
   persistHistory() {
     StorageManager.saveHistory(this.history);
+  }
+
+  persistConstraints() {
+    StorageManager.saveConstraints(this.constraints);
   }
 
   /**
@@ -933,3 +1414,4 @@ class PartnerApp {
 window.addEventListener('DOMContentLoaded', () => {
   window.partnerApp = new PartnerApp();
 });
+
