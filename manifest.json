@@ -1,0 +1,19 @@
+{
+  "name": "Partner - Student Group & Pair Generator",
+  "short_name": "Partner",
+  "description": "Smart, non-repeating student pair and group generator with persistent local history.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
